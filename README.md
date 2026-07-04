@@ -11,7 +11,7 @@ FastAPI · PostgreSQL 16 · Redis + arq · Playwright (Chromium) · Next.js 14 �
 ## Run it
 
 ```bash
-cp .env.example deploy/.env   # then edit (at minimum set a real APIFY_USER_AGENT)
+cp .env.example deploy/.env   # then edit (at minimum set a real LAZARUS_USER_AGENT)
 make dev                      # docker compose up --build
 ```
 

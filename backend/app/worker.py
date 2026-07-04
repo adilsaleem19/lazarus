@@ -30,7 +30,7 @@ async def _respect_domain_rate(redis, host: str) -> None:
     if redis is None:
         return
     for _ in range(20):
-        if await redis.set(f"apify:domain-rate:{host}", "1", nx=True, px=1000):
+        if await redis.set(f"lazarus:domain-rate:{host}", "1", nx=True, px=1000):
             return
         await asyncio.sleep(0.25)
 

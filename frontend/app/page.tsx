@@ -22,10 +22,10 @@ export default function Home() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-6 p-8">
       <h1 className="text-4xl font-bold tracking-tight">
-        API<span className="text-emerald-400">fy</span>
+        Lazarus<span className="text-emerald-400">_</span>
       </h1>
       <p className="text-zinc-400 text-center max-w-md">
-        Autonomous website-to-API agent. Phase 1: ingestion engine.
+        Give it any website — it raises a living API from the dead.
         <br />
         The real interface arrives in Phase 4.
       </p>

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "APIfy — turn any website into an API",
+  title: "Lazarus — raise a living API from any website",
   description: "Paste a public URL, get a working documented REST API in ~60 seconds.",
 };
 

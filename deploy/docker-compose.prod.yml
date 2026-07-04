@@ -8,7 +8,7 @@ services:
     restart: unless-stopped
     mem_limit: 512m
     environment:
-      APIFY_ENVIRONMENT: prod
+      LAZARUS_ENVIRONMENT: prod
 
   worker:
     volumes: []
@@ -17,7 +17,7 @@ services:
     mem_limit: 1536m
     shm_size: 256m
     environment:
-      APIFY_ENVIRONMENT: prod
+      LAZARUS_ENVIRONMENT: prod
 
   frontend:
     command: npm run start
@@ -44,4 +44,4 @@ services:
       - "80:80"
       - "443:443"
     environment:
-      APIFY_DOMAIN: ${APIFY_DOMAIN:?set APIFY_DOMAIN in .env, e.g. apify.203-0-113-7.nip.io}
+      LAZARUS_DOMAIN: ${LAZARUS_DOMAIN:?set LAZARUS_DOMAIN in .env, e.g. lazarus.203-0-113-7.nip.io}

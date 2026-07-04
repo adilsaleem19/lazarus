@@ -2,14 +2,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="APIFY_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="LAZARUS_", env_file=".env", extra="ignore")
 
     environment: str = "dev"
-    database_url: str = "postgresql+asyncpg://apify:apify@localhost:5432/apify"
+    database_url: str = "postgresql+asyncpg://lazarus:lazarus@localhost:5432/lazarus"
     redis_url: str = "redis://localhost:6379/0"
 
     # Honest identity sent to every target site; override with a real contact in .env.
-    user_agent: str = "APIfyBot/0.1 (+contact not configured)"
+    user_agent: str = "LazarusBot/0.1 (+contact not configured)"
 
     page_load_timeout_ms: int = 15_000
     network_quiet_ms: int = 1_500

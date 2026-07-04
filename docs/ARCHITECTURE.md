@@ -1,4 +1,4 @@
-# APIfy — Architecture
+# Lazarus — Architecture
 
 Autonomous agent that turns any public website URL into a working, documented REST API in ~60 seconds. Runs entirely on one 4GB VPS; the only runtime dependency with a bill attached is the VPS itself (LLM calls use free tiers).
 
@@ -72,7 +72,7 @@ Any exception fails the job with the error message stored — nothing crashes th
 backend/
   app/
     main.py            FastAPI factory + lifespan wiring
-    config.py          pydantic-settings (APIFY_* env vars)
+    config.py          pydantic-settings (LAZARUS_* env vars)
     models.py          Job, PageSnapshot
     job_states.py      state machine
     worker.py          arq settings + analyze_job pipeline

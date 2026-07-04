@@ -1,16 +1,16 @@
-name: apify
+name: lazarus
 
 services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-apify}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-apify}
-      POSTGRES_DB: ${POSTGRES_DB:-apify}
+      POSTGRES_USER: ${POSTGRES_USER:-lazarus}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lazarus}
+      POSTGRES_DB: ${POSTGRES_DB:-lazarus}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-apify}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lazarus}"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -30,10 +30,13 @@ services:
       dockerfile: Dockerfile
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     environment: &backend_env
-      APIFY_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-apify}:${POSTGRES_PASSWORD:-apify}@postgres:5432/${POSTGRES_DB:-apify}
-      APIFY_REDIS_URL: redis://redis:6379/0
-      APIFY_USER_AGENT: ${APIFY_USER_AGENT:-APIfyBot/0.1 (+set APIFY_USER_AGENT in .env)}
-      APIFY_ENVIRONMENT: ${APIFY_ENVIRONMENT:-dev}
+      LAZARUS_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-lazarus}:${POSTGRES_PASSWORD:-lazarus}@postgres:5432/${POSTGRES_DB:-lazarus}
+      LAZARUS_REDIS_URL: redis://redis:6379/0
+      LAZARUS_USER_AGENT: ${LAZARUS_USER_AGENT:-LazarusBot/0.1 (+set LAZARUS_USER_AGENT in .env)}
+      LAZARUS_ENVIRONMENT: ${LAZARUS_ENVIRONMENT:-dev}
+      LAZARUS_LLM_PROVIDER: ${LAZARUS_LLM_PROVIDER:-groq}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
     volumes:
       - ../backend:/srv/backend
     ports:

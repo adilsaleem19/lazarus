@@ -28,7 +28,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await pool.aclose()
         await engine.dispose()
 
-    app = FastAPI(title="APIfy", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Lazarus", version="0.1.0", lifespan=lifespan)
     app.include_router(health_router)
     app.include_router(jobs_router)
     return app

@@ -6,7 +6,7 @@ import respx
 
 from app.ingestion.robots import check_robots
 
-UA = "APIfyBot/0.1 (+https://example.dev/about)"
+UA = "LazarusBot/0.1 (+https://example.dev/about)"
 
 
 def client() -> httpx.AsyncClient:

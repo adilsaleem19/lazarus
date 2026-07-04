@@ -1,4 +1,4 @@
-{$APIFY_DOMAIN} {
+{$LAZARUS_DOMAIN} {
 	encode gzip
 
 	@backend path /jobs* /healthz /readyz /api/*
