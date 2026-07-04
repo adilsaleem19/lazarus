@@ -1,0 +1,12 @@
+:8080 {
+	encode gzip
+
+	@backend path /jobs* /healthz /readyz /docs* /openapi.json /api/*
+	handle @backend {
+		reverse_proxy api:8000
+	}
+
+	handle {
+		reverse_proxy frontend:3000
+	}
+}

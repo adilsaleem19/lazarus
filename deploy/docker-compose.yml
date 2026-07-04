@@ -1,0 +1,87 @@
+name: apify
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-apify}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-apify}
+      POSTGRES_DB: ${POSTGRES_DB:-apify}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-apify}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    environment: &backend_env
+      APIFY_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-apify}:${POSTGRES_PASSWORD:-apify}@postgres:5432/${POSTGRES_DB:-apify}
+      APIFY_REDIS_URL: redis://redis:6379/0
+      APIFY_USER_AGENT: ${APIFY_USER_AGENT:-APIfyBot/0.1 (+set APIFY_USER_AGENT in .env)}
+      APIFY_ENVIRONMENT: ${APIFY_ENVIRONMENT:-dev}
+    volumes:
+      - ../backend:/srv/backend
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile.worker
+    command: arq app.worker.WorkerSettings
+    environment: *backend_env
+    volumes:
+      - ../backend:/srv/backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ../frontend
+    command: npm run dev
+    volumes:
+      - ../frontend:/srv/frontend
+      - /srv/frontend/node_modules
+      - /srv/frontend/.next
+    ports:
+      - "3000:3000"
+
+  caddy:
+    image: caddy:2-alpine
+    volumes:
+      - ./Caddyfile.dev:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    ports:
+      - "8080:8080"
+    depends_on:
+      - api
+      - frontend
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

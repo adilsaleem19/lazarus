@@ -1,0 +1,17 @@
+<!doctype html>
+<html>
+<head><title>Fixture Shop</title></head>
+<body>
+<h1>Fixture Shop</h1>
+<div id="grid"></div>
+<script>
+fetch('/data.json')
+  .then(function (r) { return r.json(); })
+  .then(function (items) {
+    document.getElementById('grid').innerHTML = items
+      .map(function (i) { return '<div class="card"><h3>' + i.name + '</h3></div>'; })
+      .join('');
+  });
+</script>
+</body>
+</html>

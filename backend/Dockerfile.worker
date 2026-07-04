@@ -1,0 +1,17 @@
+# Worker container: arq + Playwright Chromium.
+# Browser is installed via the pip-pinned playwright so versions always match.
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+WORKDIR /srv/backend
+
+COPY requirements.txt .
+RUN pip install -r requirements.txt \
+    && python -m playwright install --with-deps chromium \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY . .
+
+CMD ["arq", "app.worker.WorkerSettings"]
