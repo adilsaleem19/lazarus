@@ -20,7 +20,11 @@ class FakeQueue:
 
 @pytest.fixture
 def settings() -> Settings:
-    return Settings(database_url="sqlite+aiosqlite://", redis_url="redis://unused:6379/0")
+    s = Settings(database_url="sqlite+aiosqlite://", redis_url="redis://unused:6379/0")
+    # Keep unit tests hermetic: never invoke a real LLM even if a key is in the env.
+    s.groq_api_key = ""
+    s.gemini_api_key = ""
+    return s
 
 
 @pytest.fixture

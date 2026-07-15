@@ -5,11 +5,23 @@ import uuid
 import pytest
 from sqlalchemy import select
 
+from app.agent.loop import AgentOutcome
 from app.ingestion.capture import CaptureResult
 from app.ingestion.robots import RobotsVerdict
 from app.job_states import JobStatus
-from app.models import Job, PageSnapshot
+from app.models import Extractor, Job, JobEvent, LLMCall, PageSnapshot
 from app.worker import analyze_job
+
+FAKE_CALL = {
+    "provider": "groq",
+    "model": "llama-4-scout",
+    "purpose": "codegen",
+    "prompt": "generate an extractor",
+    "response": '{"code": "..."}',
+    "prompt_tokens": 40,
+    "completion_tokens": 12,
+    "total_tokens": 52,
+}
 
 CARDS_HTML = (
     "<html><head><title>Shop</title></head><body><div id='grid'>"
@@ -108,3 +120,70 @@ async def test_url_resolving_to_private_ip_fails_job(ctx, sessionmaker):
     job, _ = await reload_job(sessionmaker, job_id)
     assert job.status == JobStatus.FAILED.value
     assert job.reason
+
+
+async def _rows(sessionmaker, model, job_id):
+    async with sessionmaker() as session:
+        result = await session.execute(select(model).where(model.job_id == uuid.UUID(job_id)))
+        return result.scalars().all()
+
+
+async def test_agent_success_persists_extractor_calls_and_events(ctx, sessionmaker):
+    async def fake_agent(*, context, settings, http, emitter, on_call, sandbox):
+        await emitter.emit("strategy_chosen", "Parsing the HTML", data={"strategy": "html"})
+        on_call(dict(FAKE_CALL))
+        return AgentOutcome(
+            ok=True,
+            strategy="html",
+            records=[{"title": "P0", "url": "/p/0"}, {"title": "P1", "url": "/p/1"}],
+            code="def extract(html):\n    return []",
+            record_schema={"fields": [{"name": "title", "type": "string", "required": True}]},
+            repair_count=1,
+            reason="validated",
+        )
+
+    ctx["run_agent"] = fake_agent
+    job_id = await make_job(sessionmaker, url="https://books.toscrape.com/catalogue/page-1.html")
+    outcome = await analyze_job(ctx, job_id)
+    assert outcome == "done"
+
+    job, snap = await reload_job(sessionmaker, job_id)
+    assert job.status == JobStatus.DONE.value
+    assert snap is not None
+
+    extractors = await _rows(sessionmaker, Extractor, job_id)
+    assert len(extractors) == 1
+    ext = extractors[0]
+    assert ext.strategy == "html"
+    assert ext.slug == "books-toscrape-com-catalogue"
+    assert ext.source_url == "https://books.toscrape.com/catalogue/page-1.html"
+    assert ext.sample == [{"title": "P0", "url": "/p/0"}, {"title": "P1", "url": "/p/1"}]
+
+    calls = await _rows(sessionmaker, LLMCall, job_id)
+    assert len(calls) == 1
+    assert calls[0].total_tokens == 52
+
+    events = await _rows(sessionmaker, JobEvent, job_id)
+    assert any(e.kind == "strategy_chosen" for e in events)
+
+
+async def test_agent_failure_marks_failed_but_keeps_snapshot(ctx, sessionmaker):
+    async def fake_agent(*, context, settings, http, emitter, on_call, sandbox):
+        on_call(dict(FAKE_CALL))
+        return AgentOutcome(
+            ok=False, strategy="html", repair_count=4, reason="exhausted repair attempts"
+        )
+
+    ctx["run_agent"] = fake_agent
+    job_id = await make_job(sessionmaker)
+    outcome = await analyze_job(ctx, job_id)
+    assert outcome == "no_extractor"
+
+    job, snap = await reload_job(sessionmaker, job_id)
+    assert job.status == JobStatus.FAILED.value
+    assert "exhausted repair attempts" in job.reason
+    assert snap is not None  # the captured snapshot survives the agent failure
+
+    assert await _rows(sessionmaker, Extractor, job_id) == []
+    # even a failed run logs its LLM spend for cost tracking
+    assert len(await _rows(sessionmaker, LLMCall, job_id)) == 1

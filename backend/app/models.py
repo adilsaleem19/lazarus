@@ -45,3 +45,60 @@ class PageSnapshot(Base):
     robots_status: Mapped[str] = mapped_column(sa.String(16))
     robots_reason: Mapped[str | None] = mapped_column(sa.Text)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=utcnow)
+
+
+class JobEvent(Base):
+    """One step of the agent's reasoning, streamed live and kept for replay."""
+
+    __tablename__ = "job_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid, sa.ForeignKey("jobs.id", ondelete="CASCADE"), index=True
+    )
+    seq: Mapped[int] = mapped_column(sa.Integer)
+    kind: Mapped[str] = mapped_column(sa.String(32))
+    message: Mapped[str] = mapped_column(sa.Text)
+    data: Mapped[dict] = mapped_column(JSONColumn, default=dict)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (sa.UniqueConstraint("job_id", "seq", name="uq_job_events_job_seq"),)
+
+
+class LLMCall(Base):
+    """Full log of every prompt/response — feeds the 'watch it think' UI and cost tracking."""
+
+    __tablename__ = "llm_calls"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid, sa.ForeignKey("jobs.id", ondelete="CASCADE"), index=True
+    )
+    provider: Mapped[str] = mapped_column(sa.String(32))
+    model: Mapped[str] = mapped_column(sa.String(128))
+    purpose: Mapped[str] = mapped_column(sa.String(32))
+    prompt: Mapped[str] = mapped_column(sa.Text)
+    response: Mapped[str] = mapped_column(sa.Text)
+    prompt_tokens: Mapped[int] = mapped_column(sa.Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(sa.Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(sa.Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=utcnow)
+
+
+class Extractor(Base):
+    """A validated scraper: the durable product of a successful agent run."""
+
+    __tablename__ = "extractors"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid, sa.ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True
+    )
+    slug: Mapped[str] = mapped_column(sa.String(128), index=True)
+    source_url: Mapped[str] = mapped_column(sa.String(2048))
+    strategy: Mapped[str] = mapped_column(sa.String(16))
+    code: Mapped[str] = mapped_column(sa.Text)
+    record_schema: Mapped[dict] = mapped_column(JSONColumn, default=dict)
+    version: Mapped[int] = mapped_column(sa.Integer, default=1)
+    sample: Mapped[list] = mapped_column(JSONColumn, default=list)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=utcnow)

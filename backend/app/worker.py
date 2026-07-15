@@ -12,15 +12,18 @@ import httpx
 import structlog
 from arq.connections import RedisSettings
 
+from app.agent.service import build_context, make_slug
+from app.agent.service import run_agent as run_agent_default
 from app.config import Settings
 from app.db import make_engine, make_sessionmaker
+from app.events import EventEmitter
 from app.ingestion.capture import capture_page
 from app.ingestion.distill import distill
 from app.ingestion.robots import check_robots
 from app.ingestion.urlguard import default_resolver, validate_target_url
 from app.job_states import JobStatus, assert_transition
 from app.logging import configure_logging
-from app.models import Job, PageSnapshot
+from app.models import Extractor, Job, LLMCall, PageSnapshot
 
 log = structlog.get_logger()
 
@@ -40,6 +43,41 @@ def _set_status(job: Job, new: JobStatus, reason: str | None = None) -> None:
     job.status = new.value
     if reason is not None:
         job.reason = reason
+
+
+async def _run_agent_stage(run_agent, ctx, settings, job_id: str, context: dict, slug: str):
+    """Run the agent, streaming events, then persist its LLM calls and (if any) extractor."""
+    sessionmaker = ctx["sessionmaker"]
+    emitter = EventEmitter(job_id, sessionmaker, ctx.get("redis"))
+    calls: list[dict] = []
+
+    outcome = await run_agent(
+        context=context,
+        settings=settings,
+        http=ctx.get("http"),
+        emitter=emitter,
+        on_call=calls.append,
+        sandbox=ctx.get("sandbox"),
+    )
+
+    job_uuid = uuid.UUID(job_id)
+    async with sessionmaker() as session:
+        for call in calls:
+            session.add(LLMCall(job_id=job_uuid, **call))
+        if outcome.ok:
+            session.add(
+                Extractor(
+                    job_id=job_uuid,
+                    slug=slug,
+                    source_url=context["url"],
+                    strategy=outcome.strategy,
+                    code=outcome.code or "",
+                    record_schema=outcome.record_schema or {},
+                    sample=(outcome.records or [])[:5],
+                )
+            )
+        await session.commit()
+    return outcome
 
 
 async def analyze_job(ctx: dict, job_id: str) -> str:
@@ -89,16 +127,48 @@ async def analyze_job(ctx: dict, job_id: str) -> str:
                     robots_reason=verdict.reason,
                 )
             )
-            _set_status(job, JobStatus.DONE)
-            await session.commit()
+            await session.commit()  # snapshot durable before the (long) agent stage
             log.info(
-                "job_done",
+                "job_captured",
                 job_id=job_id,
                 tokens=distilled.token_estimate,
                 xhr=len(result.xhr),
                 structures=len(distilled.structures),
             )
-            return "done"
+
+            run_agent = ctx.get("run_agent")
+            if run_agent is None and settings.llm_configured:
+                run_agent = run_agent_default
+            if run_agent is None:
+                # No LLM configured: analysis stops at the captured snapshot.
+                _set_status(job, JobStatus.DONE, reason="captured page (no LLM configured)")
+                await session.commit()
+                return "captured"
+
+            context = build_context(url, result, distilled)
+            slug = make_slug(url)
+            outcome = await _run_agent_stage(run_agent, ctx, settings, job_id, context, slug)
+            if outcome.ok:
+                _set_status(
+                    job,
+                    JobStatus.DONE,
+                    reason=(
+                        f"built extractor '{slug}' via {outcome.strategy} "
+                        f"after {outcome.repair_count} repair(s)"
+                    ),
+                )
+                await session.commit()
+                log.info("job_done", job_id=job_id, slug=slug, strategy=outcome.strategy)
+                return "done"
+
+            _set_status(
+                job,
+                JobStatus.FAILED,
+                reason=f"could not build a validated extractor: {outcome.reason}",
+            )
+            await session.commit()
+            log.info("job_no_extractor", job_id=job_id, reason=outcome.reason)
+            return "no_extractor"
         except Exception as exc:  # noqa: BLE001 — job must record any failure
             log.exception("job_failed", job_id=job_id)
             _set_status(job, JobStatus.FAILED, reason=str(exc))

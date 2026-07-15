@@ -1,7 +1,4 @@
 # Claude Code Opening Prompt — "APIfy" (Autonomous Website-to-API Agent)
-
-Copy everything below the line into Claude Code as your opening message.
-
 ---
 
 ## PROJECT BRIEF
