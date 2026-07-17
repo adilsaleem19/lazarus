@@ -3,7 +3,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="LAZARUS_", env_file=".env", extra="ignore")
+    # populate_by_name: fields with a validation_alias (the API keys) must still be
+    # settable as Settings(groq_api_key=...) — tests rely on it, and without this
+    # pydantic silently drops the kwarg (masked locally by .env, exposed on CI).
+    model_config = SettingsConfigDict(
+        env_prefix="LAZARUS_", env_file=".env", extra="ignore", populate_by_name=True
+    )
 
     environment: str = "dev"
     database_url: str = "postgresql+asyncpg://lazarus:lazarus@localhost:5432/lazarus"
