@@ -80,6 +80,26 @@ async def test_happy_path_validates_first_try():
     assert "repair_attempt" not in kinds(emitter)
 
 
+async def test_html_strategy_executes_against_full_html_not_skeleton():
+    # The skeleton collapses repeated siblings to 2 samples — good for the prompt,
+    # wrong for execution: running against it would lose most of the records.
+    llm = FakeLLM([STRATEGY_JSON, CODEGEN_GOOD])
+    emitter = RecordingEmitter()
+    seen = {}
+
+    def fake_sandbox(code, html, timeout):
+        seen["source"] = html
+        return SandboxResult(ok=True, records=[{"title": "A", "url": "/a"}], error=None)
+
+    ctx = page_context()
+    ctx["html"] = "<div>" + "<h1>A</h1>" * 20 + "</div>"
+    loop = AgentLoop(llm=llm, emitter=emitter, sandbox=fake_sandbox, max_repairs=4)
+    outcome = await loop.run(ctx)
+
+    assert outcome.ok is True
+    assert seen["source"] == ctx["html"]
+
+
 async def test_repairs_after_empty_extraction_then_succeeds():
     llm = FakeLLM([STRATEGY_JSON, CODEGEN_BAD, CODEGEN_GOOD])
     emitter = RecordingEmitter()

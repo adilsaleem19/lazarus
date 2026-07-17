@@ -11,7 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.agent.parsing import ParseError, extract_json
+from app.agent.parsing import extract_json, parse_extractor_response
 from app.agent.prompts import codegen_messages, repair_messages, strategy_messages
 from app.agent.validation import validate_records
 from app.sandbox import SandboxResult
@@ -62,10 +62,13 @@ class AgentLoop:
                 result = await self._llm.complete(
                     messages, purpose="repair" if attempt else "codegen"
                 )
-                parsed = extract_json(result.content)
-                code = parsed["code"]
-                schema = parsed.get("schema", {"fields": []})
-            except (ParseError, KeyError, Exception) as exc:  # noqa: BLE001
+                code, parsed_schema = parse_extractor_response(result.content)
+                # A fence-only rescue carries no schema; keep the one we already have.
+                if parsed_schema is not None:
+                    schema = parsed_schema
+                elif schema is None:
+                    schema = {"fields": []}
+            except Exception as exc:  # noqa: BLE001
                 error = f"could not parse LLM code output: {exc}"
                 if attempt == 0:
                     await self._emitter.emit("code_generated", "Model returned unusable output")
@@ -158,4 +161,7 @@ class AgentLoop:
             chosen = next((r for r in ctx.get("xhr", []) if r.get("url") == target), None)
             if chosen:
                 return chosen.get("body", "")
-        return ctx.get("skeleton", "") or ctx.get("html", "")
+        # Prompt from the skeleton (cheap), but EXECUTE against the full HTML:
+        # the skeleton collapses repeated siblings, which would silently drop
+        # most of the records the extractor exists to return.
+        return ctx.get("html", "") or ctx.get("skeleton", "")

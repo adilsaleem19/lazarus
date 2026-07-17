@@ -23,6 +23,11 @@ _CODE_RULES = (
     "collections, itertools, math, string, html.\n"
     "- For HTML strategy the argument is the page HTML string; parse with "
     "selectolax.parser.HTMLParser.\n"
+    "- selectolax API (it is NOT BeautifulSoup/Scrapy): tree = HTMLParser(html); "
+    "tree.css('div.card') returns a list of nodes; node.css_first('a') returns one node "
+    "or None; node.text(strip=True) gets text; node.attributes.get('href') gets an "
+    "attribute (may be None). There is NO css_select method and NO ::text or ::attr() "
+    "pseudo-selectors — plain CSS selectors only.\n"
     "- For JSON strategy the argument is the raw JSON text of the chosen XHR response; "
     "parse it with json.loads.\n"
     "- Return a list of flat dicts with consistent keys. Coerce numbers where sensible.\n"
@@ -73,7 +78,9 @@ def codegen_messages(ctx: dict, strategy: str, target: str) -> list[LLMMessage]:
         f"Target page: {ctx['url']}\n\n"
         f"{source}\n"
         f"{_CODE_RULES}\n"
-        "Also define the record schema describing the fields you extract.\n"
+        "Also define the record schema describing the fields you extract. Mark a field "
+        '"required" only if every record will have a non-empty value for it; anything '
+        "that can be absent or empty must be optional.\n"
         "Respond with ONLY a JSON object in this exact shape:\n"
         '{"code": "<python source for extract()>", '
         '"schema": {"fields": [{"name": "<field>", "type": '
@@ -93,8 +100,10 @@ def repair_messages(
             f"```python\n{code}\n```\n"
             f"Failure: {error}\n\n"
             "Fix it. Look carefully at the actual data sample above — your selectors or keys "
-            "were probably wrong. Respond with ONLY the same JSON object shape as before "
-            '({"code", "schema"}).',
+            "were probably wrong. If the failure says a required field is missing from some "
+            "records, that field is not universal on this page: set \"required\": false for "
+            "it in the schema (and use null, not '', when it is absent). Respond with ONLY "
+            'the same JSON object shape as before ({"code", "schema"}).',
         )
     )
     return base

@@ -8,6 +8,8 @@ developing, without standing up the whole stack.
 import asyncio
 import json
 import sys
+import tempfile
+from pathlib import Path
 
 import httpx
 
@@ -85,10 +87,19 @@ async def _run(url: str) -> int:
         return 0
 
     print(f"✗ FAILED: {outcome.reason} ({tokens} tokens used).")
+    dump = Path(tempfile.gettempdir()) / "lazarus-cli-last-run.json"
+    dump.write_text(json.dumps(calls, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(f"  Full prompt/response log: {dump}")
     return 1
 
 
 def main() -> None:
+    # Windows consoles default to a legacy codepage that can't print the
+    # status markers; never let output encoding crash the run.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
     if len(sys.argv) != 2:
         print("usage: python -m app.cli <url>")
         raise SystemExit(2)

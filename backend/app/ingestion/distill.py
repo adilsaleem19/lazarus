@@ -62,6 +62,23 @@ def _signature(node: Node) -> tuple[str, tuple[str, ...]]:
     return (node.tag, tuple(sorted(class_attr.split())))
 
 
+def _subtree_size(node: Node) -> int:
+    return sum(1 + _subtree_size(c) for c in _children(node) if _is_element(c))
+
+
+def _size_bucket(size: int) -> int:
+    """Coarse buckets so only structurally comparable siblings collapse together.
+
+    (tag, class) alone treats a header row, an empty spacer row, and the row
+    holding a page's entire content as identical — collapsing them keeps the
+    spacer as a "sample" and silently drops the content (seen on Hacker News).
+    """
+    for bucket, upper in enumerate((0, 3, 10, 30, 100)):
+        if size <= upper:
+            return bucket
+    return 5
+
+
 def _selector(signature: tuple[str, tuple[str, ...]]) -> str:
     tag, classes = signature
     return tag + "".join(f".{c}" for c in classes)
@@ -90,7 +107,7 @@ def _render_attrs(node: Node, profile: RenderProfile) -> str:
 
 def _render(node: Node, profile: RenderProfile, out: list[str]) -> None:
     elements = [c for c in _children(node) if _is_element(c)]
-    counts = Counter(_signature(c) for c in elements)
+    counts = Counter((_signature(c), _size_bucket(_subtree_size(c))) for c in elements)
     emitted: Counter = Counter()
 
     for child in _children(node):
@@ -103,12 +120,13 @@ def _render(node: Node, profile: RenderProfile, out: list[str]) -> None:
             continue
 
         signature = _signature(child)
-        if counts[signature] >= COLLAPSE_THRESHOLD:
-            emitted[signature] += 1
-            if emitted[signature] == profile.samples + 1:
-                remaining = counts[signature] - profile.samples
+        group = (signature, _size_bucket(_subtree_size(child)))
+        if counts[group] >= COLLAPSE_THRESHOLD:
+            emitted[group] += 1
+            if emitted[group] == profile.samples + 1:
+                remaining = counts[group] - profile.samples
                 out.append(f"<!-- +{remaining} more {_selector(signature)} -->")
-            if emitted[signature] > profile.samples:
+            if emitted[group] > profile.samples:
                 continue
 
         out.append(f"<{child.tag}{_render_attrs(child, profile)}>")

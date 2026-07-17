@@ -78,6 +78,29 @@ class TestRepeatCollapsing:
         result = distill(page(cards(2)))
         assert result.skeleton.count('class="card"') == 2
 
+    def test_dissimilar_siblings_sharing_a_tag_are_not_collapsed_together(self):
+        # Hacker News shape: an outer table whose <tr>s are a header row, an empty
+        # spacer, THE row holding all the content, and a footer. Same (tag, class)
+        # signature, wildly different subtrees — collapsing them as "identical"
+        # throws away the entire story list.
+        stories = "".join(
+            f'<tr class="athing"><td><a href="/item?id={i}">Story {i}</a></td></tr>'
+            for i in range(20)
+        )
+        html = page(
+            "<table><tbody>"
+            "<tr><td><b>Site Header</b></td></tr>"
+            "<tr></tr>"
+            f"<tr><td><table><tbody>{stories}</tbody></table></td></tr>"
+            '<tr><td><span class="yclinks">footer</span></td></tr>'
+            "</tbody></table>"
+        )
+        result = distill(html)
+        # the content row must survive: story samples + a collapse marker for the rest
+        assert "Story 0" in result.skeleton
+        assert "athing" in result.skeleton
+        assert "more" in result.skeleton
+
 
 class TestStructureDetection:
     def test_detects_table_with_columns_and_row_count(self):
