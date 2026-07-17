@@ -8,8 +8,10 @@ from app.config import Settings
 from app.db import make_engine, make_sessionmaker
 from app.logging import configure_logging
 from app.queue import ArqQueue
+from app.ratelimit import JobRateLimiter
 from app.routes.health import router as health_router
 from app.routes.jobs import router as jobs_router
+from app.routes.public_api import router as public_api_router
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -24,6 +26,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.engine = engine
         app.state.sessionmaker = make_sessionmaker(engine)
         app.state.queue = ArqQueue(pool)
+        # The arq pool is a full redis client; reuse it for rate limiting.
+        app.state.limiter = JobRateLimiter(
+            pool,
+            per_ip=app_settings.jobs_per_hour_per_ip,
+            global_limit=app_settings.jobs_per_hour_global,
+        )
         yield
         await pool.aclose()
         await engine.dispose()
@@ -31,6 +39,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="Lazarus", version="0.1.0", lifespan=lifespan)
     app.include_router(health_router)
     app.include_router(jobs_router)
+    app.include_router(public_api_router)
     return app
 
 

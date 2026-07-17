@@ -41,12 +41,18 @@ async def sessionmaker(engine):
     return make_sessionmaker(engine)
 
 
+class _NoOpLimiter:
+    async def check(self, ip: str) -> None:
+        return None
+
+
 @pytest.fixture
 async def app(settings, sessionmaker):
     app = create_app(settings)
     app.state.settings = settings
     app.state.sessionmaker = sessionmaker
     app.state.queue = FakeQueue()
+    app.state.limiter = _NoOpLimiter()  # tests opt into real limiting explicitly
     return app
 
 

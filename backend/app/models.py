@@ -86,7 +86,13 @@ class LLMCall(Base):
 
 
 class Extractor(Base):
-    """A validated scraper: the durable product of a successful agent run."""
+    """A validated scraper: the durable product of a successful agent run.
+
+    Phase 3 turns each row into a live endpoint: `data` is the cached result set
+    served by GET /api/{slug}, refreshed on a schedule. `status` lifecycle:
+    active (serving + refreshing) -> paused (3 failed refreshes; still serves
+    stale data) or evicted (LRU limit; endpoint gone).
+    """
 
     __tablename__ = "extractors"
 
@@ -97,8 +103,19 @@ class Extractor(Base):
     slug: Mapped[str] = mapped_column(sa.String(128), index=True)
     source_url: Mapped[str] = mapped_column(sa.String(2048))
     strategy: Mapped[str] = mapped_column(sa.String(16))
+    # For json_xhr: the hidden API URL whose response body extract() parses.
+    # Refresh re-captures the page and re-matches this URL in the new XHR log.
+    target: Mapped[str | None] = mapped_column(sa.String(2048))
     code: Mapped[str] = mapped_column(sa.Text)
     record_schema: Mapped[dict] = mapped_column(JSONColumn, default=dict)
     version: Mapped[int] = mapped_column(sa.Integer, default=1)
     sample: Mapped[list] = mapped_column(JSONColumn, default=list)
+    data: Mapped[list] = mapped_column(JSONColumn, default=list)
+    description: Mapped[str] = mapped_column(sa.Text, default="")
+    status: Mapped[str] = mapped_column(sa.String(16), default="active", index=True)
+    paused_reason: Mapped[str | None] = mapped_column(sa.Text)
+    refresh_interval_minutes: Mapped[int] = mapped_column(sa.Integer, default=30)
+    consecutive_failures: Mapped[int] = mapped_column(sa.Integer, default=0)
+    last_refreshed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    last_accessed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=utcnow)

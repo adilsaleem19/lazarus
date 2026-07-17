@@ -89,6 +89,18 @@ def codegen_messages(ctx: dict, strategy: str, target: str) -> list[LLMMessage]:
     return [LLMMessage("system", _SYSTEM), LLMMessage("user", user)]
 
 
+def describe_messages(ctx: dict, schema: dict) -> list[LLMMessage]:
+    fields = ", ".join(f["name"] for f in (schema or {}).get("fields", [])) or "records"
+    user = (
+        f"A REST API now serves data extracted from {ctx['url']} "
+        f"(page title: {ctx.get('meta', {}).get('title', 'unknown')}). "
+        f"Each record has the fields: {fields}.\n"
+        "Write a one-to-two sentence plain-language description of what this API returns, "
+        "for its documentation page. Respond with ONLY the description text, no quotes."
+    )
+    return [LLMMessage("system", _SYSTEM), LLMMessage("user", user)]
+
+
 def repair_messages(
     ctx: dict, strategy: str, target: str, code: str, error: str
 ) -> list[LLMMessage]:

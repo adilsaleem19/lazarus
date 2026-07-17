@@ -62,3 +62,32 @@ class TestMalformed:
         with pytest.raises(UnsafeURLError) as exc:
             validate_target_url("http://127.0.0.1/")
         assert str(exc.value)
+
+
+class TestDenyHosts:
+    """The operator's own infrastructure must never be a scrape target."""
+
+    def test_denied_hostname_is_rejected(self):
+        with pytest.raises(UnsafeURLError):
+            validate_target_url(
+                "https://myvps.example.com/page", deny_hosts={"myvps.example.com"}
+            )
+
+    def test_denied_hostname_match_is_case_insensitive(self):
+        with pytest.raises(UnsafeURLError):
+            validate_target_url(
+                "https://MyVPS.example.COM/page", deny_hosts={"myvps.example.com"}
+            )
+
+    def test_hostname_resolving_to_denied_ip_is_rejected(self):
+        with pytest.raises(UnsafeURLError):
+            validate_target_url(
+                "https://alias.example.com/",
+                resolve=lambda host: ["203.0.113.7"],
+                deny_hosts={"203.0.113.7"},
+            )
+
+    def test_unrelated_host_still_passes(self):
+        assert validate_target_url(
+            "https://example.com/", deny_hosts={"myvps.example.com"}
+        )

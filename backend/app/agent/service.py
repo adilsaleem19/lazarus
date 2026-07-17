@@ -10,6 +10,7 @@ import re
 from urllib.parse import urlsplit
 
 from app.agent.loop import AgentLoop, AgentOutcome
+from app.agent.prompts import describe_messages
 from app.llm.budget import TokenBudget
 from app.llm.client import LLMClient, build_providers
 from app.sandbox import SandboxResult, run_extractor
@@ -70,4 +71,18 @@ async def run_agent(
         max_repairs=settings.max_repairs,
         sandbox_timeout=settings.sandbox_timeout_s,
     )
-    return await loop.run(context)
+    outcome = await loop.run(context)
+
+    if outcome.ok:
+        # One cheap extra call writes the docs blurb; losing it never fails the run.
+        try:
+            result = await client.complete(
+                describe_messages(context, outcome.record_schema or {}),
+                purpose="describe",
+                estimated_completion=120,
+                max_tokens=160,
+            )
+            outcome.description = result.content.strip()[:500]
+        except Exception:  # noqa: BLE001
+            pass
+    return outcome

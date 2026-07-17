@@ -28,8 +28,10 @@ class Settings(BaseSettings):
     gemini_api_key: str = Field(
         default="", validation_alias=AliasChoices("LAZARUS_GEMINI_API_KEY", "GEMINI_API_KEY")
     )
-    # llama-4-scout: 30K TPM / 500K TPD / 1K RPD free — far roomier than 70b's 100K TPD.
-    groq_model: str = "meta-llama/llama-4-scout-17b-16e-instruct"
+    # Free-tier models churn: llama-4-scout was decommissioned 2026-07. gpt-oss-120b
+    # is the strongest coder currently free on Groq (1K req/day, 8K tokens/min) and
+    # keeps its reasoning out of `content`, so responses stay parseable JSON.
+    groq_model: str = "openai/gpt-oss-120b"
     gemini_model: str = "gemini-2.0-flash"
     job_token_budget: int = 60_000
     max_repairs: int = 4
@@ -42,3 +44,15 @@ class Settings(BaseSettings):
     @property
     def llm_configured(self) -> bool:
         return bool(self.groq_api_key or self.gemini_api_key)
+
+    # --- Phase 3: live API fabric ---
+    max_active_extractors: int = 20
+    jobs_per_hour_per_ip: int = 3
+    jobs_per_hour_global: int = 30
+    # Comma-separated hostnames/IPs that must never be scrape targets
+    # (put your own VPS hostname and public IP here in production).
+    deny_hosts: str = ""
+
+    @property
+    def deny_hosts_set(self) -> frozenset[str]:
+        return frozenset(h.strip().lower() for h in self.deny_hosts.split(",") if h.strip())

@@ -37,7 +37,12 @@ def _check_ip(ip_text: str, context: str) -> None:
         raise UnsafeURLError(f"{context} address {ip} is not publicly routable")
 
 
-def validate_target_url(url: str, *, resolve: Resolver | None = None) -> str:
+def validate_target_url(
+    url: str,
+    *,
+    resolve: Resolver | None = None,
+    deny_hosts: frozenset[str] | set[str] = frozenset(),
+) -> str:
     if not url or not url.strip():
         raise UnsafeURLError("URL is empty")
     parts = urlsplit(url.strip())
@@ -51,6 +56,10 @@ def validate_target_url(url: str, *, resolve: Resolver | None = None) -> str:
         raise UnsafeURLError("URL has no host")
     if host.lower() == "localhost" or host.lower().endswith(".localhost"):
         raise UnsafeURLError("localhost is not a valid scrape target")
+
+    deny = {h.lower() for h in deny_hosts}
+    if host.lower() in deny:
+        raise UnsafeURLError(f"{host} is on the operator denylist")
 
     try:
         _check_ip(host, "target")
@@ -69,5 +78,7 @@ def validate_target_url(url: str, *, resolve: Resolver | None = None) -> str:
             raise UnsafeURLError(f"DNS returned no addresses for {host}")
         for address in addresses:
             _check_ip(address, f"{host} resolved")
+            if address in deny:
+                raise UnsafeURLError(f"{host} resolves to a denylisted address")
 
     return urlunsplit(parts)

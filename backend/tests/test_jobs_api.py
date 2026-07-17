@@ -14,7 +14,8 @@ async def test_healthz(api):
 
 class TestCreateJob:
     async def test_valid_url_is_accepted_and_enqueued(self, api, app):
-        resp = await api.post("/jobs", json={"url": "https://example.com/news"})
+        payload = {"url": "https://example.com/news", "responsible_use": True}
+        resp = await api.post("/jobs", json=payload)
         assert resp.status_code == 202
         body = resp.json()
         assert body["status"] == "queued"
@@ -22,12 +23,14 @@ class TestCreateJob:
         assert app.state.queue.enqueued == [body["id"]]
 
     async def test_non_http_scheme_is_rejected(self, api, app):
-        resp = await api.post("/jobs", json={"url": "file:///etc/passwd"})
+        payload = {"url": "file:///etc/passwd", "responsible_use": True}
+        resp = await api.post("/jobs", json=payload)
         assert resp.status_code == 422
         assert app.state.queue.enqueued == []
 
     async def test_private_address_is_rejected(self, api, app):
-        resp = await api.post("/jobs", json={"url": "http://169.254.169.254/latest"})
+        payload = {"url": "http://169.254.169.254/latest", "responsible_use": True}
+        resp = await api.post("/jobs", json=payload)
         assert resp.status_code == 422
         assert app.state.queue.enqueued == []
         assert resp.json()["detail"]
@@ -39,7 +42,8 @@ class TestGetJob:
         assert resp.status_code == 404
 
     async def test_queued_job_has_no_snapshot(self, api):
-        created = (await api.post("/jobs", json={"url": "https://example.com/a"})).json()
+        payload = {"url": "https://example.com/a", "responsible_use": True}
+        created = (await api.post("/jobs", json=payload)).json()
         resp = await api.get(f"/jobs/{created['id']}")
         assert resp.status_code == 200
         body = resp.json()

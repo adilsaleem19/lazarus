@@ -2,7 +2,7 @@
 
 Autonomous agent that turns any public website URL into a working, documented REST API in ~60 seconds. Runs entirely on one 4GB VPS; the only runtime dependency with a bill attached is the VPS itself (LLM calls use free tiers).
 
-**Status: Phase 2 complete** — the autonomous agent (LLM → codegen → sandbox → self-repair) now turns a captured page into a validated extractor.
+**Status: Phase 3 complete** — every successful extraction is now a live, documented, rate-limited public API endpoint with scheduled refresh.
 
 ## System overview
 
@@ -87,7 +87,7 @@ flowchart TD
 ### LLM client (`app/llm/`)
 
 - **Provider-agnostic** over the OpenAI-compatible chat-completions dialect. Groq (`/openai/v1`) is the default, Google Gemini (`/v1beta/openai`) the fallback; both use Bearer auth. Order is set by `LAZARUS_LLM_PROVIDER`, and only providers with a key present are tried (`build_providers`).
-- **Free-tier discipline**: default model is `llama-4-scout` (30K TPM / 500K TPD / 1K RPD — far roomier than 70b's 100K TPD). A stable system-prompt prefix is reused verbatim so Groq's prompt cache (which doesn't count against the free tier) absorbs it.
+- **Free-tier discipline**: default model is `openai/gpt-oss-120b` (1K req/day, 8K TPM; picked after `llama-4-scout` was decommissioned mid-project — free models churn, which is exactly why the model is one env var). A stable system-prompt prefix is reused verbatim so Groq's prompt cache (which doesn't count against the free tier) absorbs it.
 - **Per-job token budget** (`llm/budget.py`, default 60K) is charged on every call and blocks a runaway repair loop from draining the daily quota.
 - **Resilience**: 429/5xx retried with exponential backoff, then fall through to the next provider; `AllProvidersFailed` only when everyone is exhausted.
 
@@ -108,6 +108,37 @@ Every agent step emits one `AgentEvent` (per-job sequence number, kind, message,
 ### Running it from the terminal
 
 `python -m app.cli <url>` runs the whole pipeline (guard → robots → capture → distill → agent) and streams events to stdout. It needs an LLM key and a Chromium install but **no Postgres or Redis** — ideal for quick local iteration.
+
+## Live API fabric (Phase 3)
+
+### Serving: `GET /api/{slug}`
+
+Each successful extraction registers a readable slug (`/api/books-toscrape-com`). The endpoint serves the **Postgres-cached** result set — a request never triggers a scrape. The envelope carries `data`, `record_count`, `last_refreshed`, `status`, and source attribution. Latest `version` wins when a site is re-analyzed; older versions are marked `superseded` and kept for history.
+
+Per-extractor documentation is generated on the fly: `GET /api/{slug}/openapi.json` builds an OpenAPI 3.1 spec from the agent's record schema, a real sample record as the example, and a one-sentence description the LLM wrote at creation time (`purpose="describe"`, one cheap call, falls back to a template). `GET /api/{slug}/docs` serves Swagger UI over that spec.
+
+### Refresh: stale-while-revalidate
+
+An arq cron scans every 5 minutes for active extractors past their `refresh_interval_minutes` (default 30) and enqueues one refresh job each, so `max_jobs = 2` bounds Chromium during refreshes too. A refresh re-runs the full guard chain (SSRF check, robots.txt, 1 req/s domain throttle), re-captures the page, executes the **stored** code in the sandbox, and validates against the stored schema. For `json_xhr` extractors the stored hidden-API URL is re-matched in the fresh capture — exact URL first, then host+path (query strings often carry timestamps).
+
+Cached data is only replaced on success. Each failure increments a strike counter; the **third consecutive strike pauses** the extractor with the reason stored. A paused endpoint keeps serving its last good data, clearly marked `status: paused`. Lifecycle:
+
+```
+active ──3 failed refreshes──► paused    (still served, marked stale)
+active ──new version built───► superseded (history only)
+active ──over the LRU cap────► evicted   (410 Gone)
+```
+
+### Abuse protection
+
+- **Responsible-use token**: `POST /jobs` requires `responsible_use: true` (the UI's checkbox); refused with a clear 422 otherwise.
+- **Rate limits**: fixed one-hour Redis windows — 3 jobs/hour per IP and 30/hour globally (the global cap is what actually protects the free LLM quota). 429 with a human-readable reason.
+- **Active cap with LRU eviction**: at most 20 live APIs; creating one beyond the cap evicts the least recently *accessed* (410 afterwards).
+- **SSRF denylist**: beyond the built-in private/link-local/reserved-IP blocks (checked pre- and post-DNS), `LAZARUS_DENY_HOSTS` lists the operator's own hostname/IP so Lazarus can never be pointed at itself.
+
+### Deployment
+
+`deploy/deploy.sh` is the one-command deploy (git pull → compose build/up → health check; migrations run in the api container's start command). `deploy/backup.sh` is a nightly `pg_dump` keeping 14 days, meant for the VPS crontab. Caddy routes `/api/*`, `/jobs*`, `/healthz` to FastAPI and everything else to the frontend, with Let's Encrypt TLS on `LAZARUS_DOMAIN`.
 
 ## Design decisions worth defending in an interview
 
@@ -131,15 +162,17 @@ backend/
     models.py          Job, PageSnapshot, JobEvent, LLMCall, Extractor
     job_states.py      state machine
     events.py          AgentEvent + EventEmitter (DB + Redis pub/sub)
-    worker.py          arq settings + analyze_job (ingestion + agent stage)
+    ratelimit.py       per-IP + global job-creation limits (Redis windows)
+    openapi_gen.py     per-extractor OpenAPI 3.1 spec builder
+    worker.py          arq settings + analyze_job + refresh cron/pipeline
     cli.py             python -m app.cli <url> — run end-to-end from the terminal
-    routes/            jobs.py, health.py
+    routes/            jobs.py, health.py, public_api.py (GET /api/{slug} + docs)
     ingestion/         urlguard.py, robots.py, capture.py, distill.py
     llm/               budget.py, client.py (Groq → Gemini, OpenAI-compatible)
     agent/             prompts.py, parsing.py, validation.py, loop.py, service.py
     sandbox/           runner.py (parent), child.py (isolated subprocess)
-  alembic/             migrations (0001 jobs+snapshots, 0002 events+llm_calls+extractors)
-  tests/               105 tests; integration marked (sandbox escapes + Chromium)
+  alembic/             migrations (0001 jobs+snapshots, 0002 agent tables, 0003 fabric)
+  tests/               161 tests; integration marked (sandbox escapes + Chromium)
 frontend/              Next.js 14 + Tailwind placeholder
 deploy/                docker-compose.yml (+prod overlay), Caddyfiles
 docs/                  this file
@@ -149,6 +182,6 @@ docs/                  this file
 ## Phase log
 
 - **Phase 1 (done):** monorepo, compose stack, ingestion pipeline (robots → capture → distill → persist), job state machine, jobs API, CI.
-- **Phase 2 (done):** LLM client (Groq default / Gemini fallback, token budget, backoff), strategy selection, scraper codegen, sandboxed execution (rlimits + import guard), self-repair loop (≤4), event stream (DB + Redis pub/sub), CLI runner.
-- **Phase 3 (next):** dynamic public endpoints serving each `Extractor`, per-extractor OpenAPI docs, refresh scheduling, abuse protection, VPS deployment.
+- **Phase 2 (done):** LLM client (Groq default / Gemini fallback, token budget, backoff), strategy selection, scraper codegen, sandboxed execution (rlimits + import guard), self-repair loop (≤4), event stream (DB + Redis pub/sub), CLI runner. Live-verified 5/5 real sites.
+- **Phase 3 (done):** `GET /api/{slug}` served from Postgres cache, per-extractor OpenAPI 3.1 + Swagger UI, scheduled stale-while-revalidate refresh with 3-strike auto-pause, versioning with supersede, abuse protection (responsible-use token, per-IP + global rate limits, LRU cap, operator denylist), deploy + backup scripts. VPS bring-up pending.
 - **Phase 4:** landing page, live agent theater (SSE), gallery, demo mode, portfolio polish.

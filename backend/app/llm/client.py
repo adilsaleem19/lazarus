@@ -82,7 +82,9 @@ class LLMClient:
         *,
         purpose: str = "",
         estimated_completion: int = 512,
-        max_tokens: int = 1500,
+        # Reasoning models (gpt-oss) spend part of this budget thinking before
+        # answering; too tight a cap truncates the JSON answer mid-object.
+        max_tokens: int = 2500,
     ) -> LLMResult:
         estimate = _estimate_tokens(messages) + estimated_completion
         if not self._budget.can_afford(estimate):
@@ -143,7 +145,9 @@ class LLMClient:
         purpose: str,
     ) -> LLMResult:
         body = response.json()
-        content = body["choices"][0]["message"]["content"]
+        # Reasoning models may return null content when the token budget ran out
+        # mid-thought; normalise so parsing fails cleanly instead of crashing.
+        content = body["choices"][0]["message"]["content"] or ""
         usage = body.get("usage", {})
         prompt_tokens = usage.get("prompt_tokens", 0)
         completion_tokens = usage.get("completion_tokens", 0)

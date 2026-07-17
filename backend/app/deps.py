@@ -18,3 +18,15 @@ def get_queue(request: Request) -> JobQueue:
 
 def get_settings(request: Request) -> Settings:
     return request.app.state.settings
+
+
+def get_limiter(request: Request):
+    return request.app.state.limiter
+
+
+def client_ip(request: Request) -> str:
+    # Caddy terminates TLS and sets X-Forwarded-For; first hop is the client.
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"

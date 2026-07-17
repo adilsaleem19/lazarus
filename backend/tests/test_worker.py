@@ -167,6 +167,48 @@ async def test_agent_success_persists_extractor_calls_and_events(ctx, sessionmak
     assert any(e.kind == "strategy_chosen" for e in events)
 
 
+async def test_agent_success_stores_full_data_and_refresh_metadata(ctx, sessionmaker):
+    records = [{"title": f"P{i}", "url": f"/p/{i}"} for i in range(12)]
+
+    async def fake_agent(*, context, settings, http, emitter, on_call, sandbox):
+        return AgentOutcome(ok=True, strategy="html", records=records,
+                            code="def extract(html):\n    return []",
+                            record_schema={"fields": []}, reason="validated")
+
+    ctx["run_agent"] = fake_agent
+    job_id = await make_job(sessionmaker)
+    await analyze_job(ctx, job_id)
+
+    ext = (await _rows(sessionmaker, Extractor, job_id))[0]
+    assert ext.data == records  # the FULL result set, not just the sample
+    assert ext.sample == records[:5]
+    assert ext.status == "active"
+    assert ext.last_refreshed_at is not None
+    assert ext.refresh_interval_minutes == 30
+    assert ext.consecutive_failures == 0
+
+
+async def test_second_run_for_same_slug_bumps_version(ctx, sessionmaker):
+    async def fake_agent(*, context, settings, http, emitter, on_call, sandbox):
+        return AgentOutcome(ok=True, strategy="html", records=[{"title": "A"}],
+                            code="def extract(html):\n    return []",
+                            record_schema={"fields": []}, reason="validated")
+
+    ctx["run_agent"] = fake_agent
+    url = "https://site.test/page"
+    for _ in range(2):
+        job_id = await make_job(sessionmaker, url=url)
+        await analyze_job(ctx, job_id)
+
+    async with sessionmaker() as session:
+        rows = (
+            (await session.execute(select(Extractor).order_by(Extractor.version)))
+            .scalars().all()
+        )
+    assert [r.version for r in rows] == [1, 2]
+    assert rows[0].slug == rows[1].slug
+
+
 async def test_agent_failure_marks_failed_but_keeps_snapshot(ctx, sessionmaker):
     async def fake_agent(*, context, settings, http, emitter, on_call, sandbox):
         on_call(dict(FAKE_CALL))

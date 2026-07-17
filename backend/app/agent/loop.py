@@ -23,11 +23,13 @@ SandboxRunner = Callable[..., SandboxResult]
 class AgentOutcome:
     ok: bool
     strategy: str
+    target: str = ""  # the chosen XHR URL for json_xhr, "html" otherwise
     records: list[dict] | None = None
     code: str | None = None
     record_schema: dict | None = None
     repair_count: int = 0
     reason: str = ""
+    description: str = ""  # LLM-written endpoint description (filled by the service)
     events_data: dict[str, Any] = field(default_factory=dict)
 
 
@@ -111,6 +113,7 @@ class AgentLoop:
             return AgentOutcome(
                 ok=True,
                 strategy=strategy,
+                target=target,
                 records=sandbox_result.records,
                 code=code,
                 record_schema=schema,
@@ -126,6 +129,7 @@ class AgentLoop:
         return AgentOutcome(
             ok=False,
             strategy=strategy,
+            target=target,
             code=code,
             record_schema=schema,
             repair_count=self._max_repairs,

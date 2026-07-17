@@ -5,6 +5,8 @@ from pydantic import BaseModel, Field
 
 class JobCreate(BaseModel):
     url: str = Field(min_length=1, max_length=2048)
+    # The "I'll use this responsibly" checkbox: the UI posts it, the API enforces it.
+    responsible_use: bool = False
 
 
 class SnapshotSummary(BaseModel):

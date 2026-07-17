@@ -2,20 +2,24 @@ import uuid
 from typing import Annotated
 
 import sqlalchemy as sa
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps import get_queue, get_session
+from app.config import Settings
+from app.deps import client_ip, get_limiter, get_queue, get_session, get_settings
 from app.ingestion.urlguard import UnsafeURLError, validate_target_url
 from app.job_states import JobStatus
 from app.models import Job, PageSnapshot
 from app.queue import JobQueue
+from app.ratelimit import JobRateLimiter
 from app.schemas import JobCreate, JobOut, SnapshotDetail, SnapshotSummary
 
 router = APIRouter(tags=["jobs"])
 
 Session = Annotated[AsyncSession, Depends(get_session)]
 Queue = Annotated[JobQueue, Depends(get_queue)]
+SettingsDep = Annotated[Settings, Depends(get_settings)]
+Limiter = Annotated[JobRateLimiter, Depends(get_limiter)]
 
 
 def _job_out(job: Job, snapshot: PageSnapshot | None) -> JobOut:
@@ -48,12 +52,30 @@ async def _latest_snapshot(session: AsyncSession, job_id: uuid.UUID) -> PageSnap
 
 
 @router.post("/jobs", status_code=202, response_model=JobOut)
-async def create_job(payload: JobCreate, session: Session, queue: Queue) -> JobOut:
+async def create_job(
+    payload: JobCreate,
+    request: Request,
+    session: Session,
+    queue: Queue,
+    settings: SettingsDep,
+    limiter: Limiter,
+) -> JobOut:
+    if not payload.responsible_use:
+        raise HTTPException(
+            status_code=422,
+            detail="please confirm responsible use: only public, non-personal data, "
+            "and respect the target site's terms",
+        )
+
     try:
         # Syntactic checks only here; the worker re-validates with DNS resolution.
-        url = validate_target_url(payload.url)
+        url = validate_target_url(payload.url, deny_hosts=settings.deny_hosts_set)
     except UnsafeURLError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    denial = await limiter.check(client_ip(request))
+    if denial:
+        raise HTTPException(status_code=429, detail=denial)
 
     job = Job(url=url, status=JobStatus.QUEUED.value)
     session.add(job)
