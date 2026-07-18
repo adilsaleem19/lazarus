@@ -128,6 +128,51 @@ async def _rows(sessionmaker, model, job_id):
         return result.scalars().all()
 
 
+async def test_pipeline_emits_the_full_event_story(ctx, sessionmaker):
+    """The live theater needs every stage, not just the agent's: one shared,
+    strictly-increasing event sequence from 'analyzing' through 'live'."""
+
+    async def fake_agent(*, context, settings, http, emitter, on_call, sandbox):
+        await emitter.emit("strategy_chosen", "Parsing the HTML")
+        return AgentOutcome(
+            ok=True, strategy="html", records=[{"title": "A"}],
+            code="def extract(html):\n    return []",
+            record_schema={"fields": []}, reason="validated",
+        )
+
+    ctx["run_agent"] = fake_agent
+    job_id = await make_job(sessionmaker)
+    await analyze_job(ctx, job_id)
+
+    events = await _rows(sessionmaker, JobEvent, job_id)
+    events.sort(key=lambda e: e.seq)
+    kinds = [e.kind for e in events]
+    assert kinds[0] == "analyzing"
+    assert "captured" in kinds
+    assert "strategy_chosen" in kinds
+    assert kinds[-1] == "live"
+    assert [e.seq for e in events] == list(range(1, len(events) + 1))
+
+    live = events[-1]
+    assert live.data["endpoint"] == "/api/site-test-page"
+    assert live.data["record_count"] == 1
+
+
+async def test_robots_block_emits_failed_event(ctx, sessionmaker):
+    from app.ingestion.robots import RobotsVerdict
+
+    async def robots_no(url, user_agent, client):
+        return RobotsVerdict(allowed=False, status="disallowed", reason="rules say no")
+
+    ctx["robots_check"] = robots_no
+    job_id = await make_job(sessionmaker)
+    await analyze_job(ctx, job_id)
+
+    events = await _rows(sessionmaker, JobEvent, job_id)
+    assert events[-1].kind == "failed"
+    assert "rules say no" in events[-1].message
+
+
 async def test_agent_success_persists_extractor_calls_and_events(ctx, sessionmaker):
     async def fake_agent(*, context, settings, http, emitter, on_call, sandbox):
         await emitter.emit("strategy_chosen", "Parsing the HTML", data={"strategy": "html"})

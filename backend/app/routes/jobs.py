@@ -3,6 +3,7 @@ from typing import Annotated
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
@@ -13,6 +14,7 @@ from app.models import Job, PageSnapshot
 from app.queue import JobQueue
 from app.ratelimit import JobRateLimiter
 from app.schemas import JobCreate, JobOut, SnapshotDetail, SnapshotSummary
+from app.sse import stream_job_events
 
 router = APIRouter(tags=["jobs"])
 
@@ -91,6 +93,20 @@ async def get_job(job_id: uuid.UUID, session: Session) -> JobOut:
         raise HTTPException(status_code=404, detail="job not found")
     snapshot = await _latest_snapshot(session, job.id)
     return _job_out(job, snapshot)
+
+
+@router.get("/jobs/{job_id}/events")
+async def stream_events(job_id: uuid.UUID, request: Request, session: Session):
+    if await session.get(Job, job_id) is None:
+        raise HTTPException(status_code=404, detail="job not found")
+
+    sessionmaker = request.app.state.sessionmaker
+    redis = getattr(request.app.state, "events_redis", None)
+    return StreamingResponse(
+        stream_job_events(sessionmaker, redis, str(job_id)),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/jobs/{job_id}/snapshot", response_model=SnapshotDetail)

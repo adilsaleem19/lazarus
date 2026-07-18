@@ -49,10 +49,11 @@ def _set_status(job: Job, new: JobStatus, reason: str | None = None) -> None:
         job.reason = reason
 
 
-async def _run_agent_stage(run_agent, ctx, settings, job_id: str, context: dict, slug: str):
+async def _run_agent_stage(
+    run_agent, ctx, settings, job_id: str, context: dict, slug: str, emitter
+):
     """Run the agent, streaming events, then persist its LLM calls and (if any) extractor."""
     sessionmaker = ctx["sessionmaker"]
-    emitter = EventEmitter(job_id, sessionmaker, ctx.get("redis"))
     calls: list[dict] = []
 
     outcome = await run_agent(
@@ -132,6 +133,8 @@ async def analyze_job(ctx: dict, job_id: str) -> str:
     resolve = ctx.get("resolve", default_resolver)
     http: httpx.AsyncClient | None = ctx.get("http")
 
+    emitter = EventEmitter(job_id, sessionmaker, ctx.get("redis"))
+
     async with sessionmaker() as session:
         job = await session.get(Job, uuid.UUID(job_id))
         if job is None:
@@ -141,6 +144,7 @@ async def analyze_job(ctx: dict, job_id: str) -> str:
         _set_status(job, JobStatus.ANALYZING)
         await session.commit()
         log.info("job_analyzing", job_id=job_id, url=job.url)
+        await emitter.emit("analyzing", f"Waking the browser — loading {job.url}")
 
         try:
             url = validate_target_url(
@@ -153,8 +157,15 @@ async def analyze_job(ctx: dict, job_id: str) -> str:
             if not verdict.allowed:
                 _set_status(job, JobStatus.FAILED, reason=verdict.reason)
                 await session.commit()
+                await emitter.emit(
+                    "failed", f"Blocked by robots.txt: {verdict.reason}",
+                    data={"stage": "robots"},
+                )
                 log.info("job_blocked_by_robots", job_id=job_id, reason=verdict.reason)
                 return "blocked"
+            await emitter.emit(
+                "robots_ok", "robots.txt allows this page", data={"status": verdict.status}
+            )
 
             await _respect_domain_rate(ctx.get("redis"), host)
             result = await capture(url, settings)
@@ -174,6 +185,17 @@ async def analyze_job(ctx: dict, job_id: str) -> str:
                 )
             )
             await session.commit()  # snapshot durable before the (long) agent stage
+            await emitter.emit(
+                "captured",
+                f"Captured page: {distilled.token_estimate} skeleton tokens, "
+                f"{len(result.xhr)} hidden JSON response(s), "
+                f"{len(distilled.structures)} structure(s)",
+                data={
+                    "tokens": distilled.token_estimate,
+                    "xhr_count": len(result.xhr),
+                    "structures": len(distilled.structures),
+                },
+            )
             log.info(
                 "job_captured",
                 job_id=job_id,
@@ -189,11 +211,16 @@ async def analyze_job(ctx: dict, job_id: str) -> str:
                 # No LLM configured: analysis stops at the captured snapshot.
                 _set_status(job, JobStatus.DONE, reason="captured page (no LLM configured)")
                 await session.commit()
+                await emitter.emit(
+                    "captured_only", "No LLM configured — stopping at the page snapshot"
+                )
                 return "captured"
 
             context = build_context(url, result, distilled)
             slug = make_slug(url)
-            outcome = await _run_agent_stage(run_agent, ctx, settings, job_id, context, slug)
+            outcome = await _run_agent_stage(
+                run_agent, ctx, settings, job_id, context, slug, emitter
+            )
             if outcome.ok:
                 _set_status(
                     job,
@@ -204,6 +231,18 @@ async def analyze_job(ctx: dict, job_id: str) -> str:
                     ),
                 )
                 await session.commit()
+                await emitter.emit(
+                    "live",
+                    f"Your API is live at /api/{slug}",
+                    data={
+                        "slug": slug,
+                        "endpoint": f"/api/{slug}",
+                        "docs": f"/api/{slug}/docs",
+                        "record_count": len(outcome.records or []),
+                        "strategy": outcome.strategy,
+                        "repairs": outcome.repair_count,
+                    },
+                )
                 log.info("job_done", job_id=job_id, slug=slug, strategy=outcome.strategy)
                 return "done"
 
@@ -219,6 +258,7 @@ async def analyze_job(ctx: dict, job_id: str) -> str:
             log.exception("job_failed", job_id=job_id)
             _set_status(job, JobStatus.FAILED, reason=str(exc))
             await session.commit()
+            await emitter.emit("failed", f"Something broke: {exc}", data={"stage": "crash"})
             return "failed"
 
 

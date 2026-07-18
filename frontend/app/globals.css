@@ -1,3 +1,43 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    background-color: theme(colors.void);
+    color: theme(colors.bone);
+    -webkit-font-smoothing: antialiased;
+    /* faint monitor grid + top glow so the void reads as a screen, not a page */
+    background-image:
+      radial-gradient(120% 90% at 50% -10%, rgba(52, 229, 161, 0.06), transparent 60%),
+      linear-gradient(theme(colors.line) 1px, transparent 1px),
+      linear-gradient(90deg, theme(colors.line) 1px, transparent 1px);
+    background-size: 100% 100%, 46px 46px, 46px 46px;
+    background-attachment: fixed;
+  }
+  ::selection {
+    background: rgba(52, 229, 161, 0.28);
+  }
+}
+
+@layer utilities {
+  .text-glow-pulse {
+    text-shadow: 0 0 18px rgba(52, 229, 161, 0.45);
+  }
+  .ring-pulse {
+    box-shadow: 0 0 0 1px rgba(52, 229, 161, 0.35), 0 0 44px -10px rgba(52, 229, 161, 0.4);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-scan-fast,
+  .animate-scan-slow,
+  .animate-blink,
+  .animate-glow,
+  .animate-rise {
+    animation: none !important;
+  }
+}

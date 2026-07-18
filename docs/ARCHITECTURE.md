@@ -2,7 +2,7 @@
 
 Autonomous agent that turns any public website URL into a working, documented REST API in ~60 seconds. Runs entirely on one 4GB VPS; the only runtime dependency with a bill attached is the VPS itself (LLM calls use free tiers).
 
-**Status: Phase 3 complete** — every successful extraction is now a live, documented, rate-limited public API endpoint with scheduled refresh.
+**Status: Phase 4 complete** — the full product: a live agent theater (SSE) over the whole pipeline, a landing page, a result screen, a public gallery, and demo mode.
 
 ## System overview
 
@@ -29,7 +29,7 @@ All six containers run from one Docker Compose file; `deploy/docker-compose.prod
 | `caddy` | caddy:2-alpine | TLS (Let's Encrypt), reverse proxy | ~40MB (unlimited) |
 | `api` | python:3.12-slim | FastAPI: job submission/status, health | 512MB |
 | `worker` | python:3.12-slim + Chromium | arq consumer: ingestion + agent (LLM, sandbox) | 1536MB |
-| `frontend` | node:20-alpine | Next.js 14 UI (placeholder until Phase 4) | 384MB |
+| `frontend` | node:20-alpine | Next.js 14 UI: landing, live theater, gallery | 384MB |
 | `postgres` | postgres:16-alpine | Jobs, snapshots, events, LLM calls, extractors | 512MB |
 | `redis` | redis:7-alpine | arq job queue, per-domain rate locks | 320MB |
 
@@ -140,6 +140,25 @@ active ──over the LRU cap────► evicted   (410 Gone)
 
 `deploy/deploy.sh` is the one-command deploy (git pull → compose build/up → health check; migrations run in the api container's start command). `deploy/backup.sh` is a nightly `pg_dump` keeping 14 days, meant for the VPS crontab. Caddy routes `/api/*`, `/jobs*`, `/healthz` to FastAPI and everything else to the frontend, with Let's Encrypt TLS on `LAZARUS_DOMAIN`.
 
+## Frontend & live theater (Phase 4)
+
+Next.js 14 (app router), Tailwind, zero runtime npm deps beyond React/Next. Design language: a **life-support monitor** — a dead page is revived into a living API. The signature element is an EKG trace whose state mirrors the job (idle flatline → heartbeat → red flatline on failure).
+
+### The live event stream (SSE)
+
+The whole pipeline — not just the agent — emits one strictly-increasing, per-job event sequence via a single shared `EventEmitter`: `analyzing → robots_ok → captured → strategy_chosen → code_generated → test_failed → repair_attempt → validated → live` (or `failed`). `app/sse.py` serves `GET /jobs/{id}/events` as `text/event-stream`: it **replays** everything already persisted in `job_events` (so reconnects and late joiners get the full story), then **follows** the per-job Redis channel live. Events carry a `seq`, which makes the replay→live handoff idempotent — duplicates from the subscribe race are dropped by `seq`, and the stream closes on the terminal event.
+
+- **Theater** (`/watch/{id}`): opens an `EventSource`, buffers by seq, and reveals events into the log. It derives the vital state, runs the T+ timer against the 60-second promise, and on `live` renders the result panel (endpoint + copy, curl, Swagger link, live JSON preview, robots ✓); on `failed`, a red flatline card with the real reason.
+- **Path split**: the theater lives at `/watch/{id}` on purpose — `/jobs/{id}` is the API, and behind one Caddy origin the two would otherwise collide. Likewise the gallery API is `/api/gallery` (never a bare `/gallery`) so it can't shadow the frontend's `/gallery` page. Rule of thumb: `/api/*` and `/jobs*` belong to the backend; every browser-facing page has its own path.
+
+### Pages
+
+- **Landing** (`/`): a single URL input (the star), a responsible-use checkbox the API enforces, an idle EKG, the four-step pipeline, and a "recently revived" strip.
+- **Gallery** (`/gallery`): grid of live APIs from `GET /api/gallery` (active only, newest first).
+- **Demo mode** (`?demo=1`): pre-fills one of three curated showcase URLs and paces the *display* of events (min gap between lines) so screen recordings stay legible. It never fabricates events — the pacing is purely client-side reveal timing over the real stream.
+
+Portfolio polish: OG/Twitter meta in `app/layout.tsx`; README carries the flow, a Mermaid diagram, the self-repair explanation, and honest limitations.
+
 ## Design decisions worth defending in an interview
 
 - **No `networkidle`.** Playwright's own docs discourage it; long-polling/analytics keep it from ever firing. Instead: `domcontentloaded`, then wait for the network to stay quiet for 1.5s inside a hard 15s budget, then proceed with whatever loaded. Degrades gracefully instead of timing out.
@@ -164,16 +183,20 @@ backend/
     events.py          AgentEvent + EventEmitter (DB + Redis pub/sub)
     ratelimit.py       per-IP + global job-creation limits (Redis windows)
     openapi_gen.py     per-extractor OpenAPI 3.1 spec builder
+    sse.py             live event stream: DB replay then Redis follow
     worker.py          arq settings + analyze_job + refresh cron/pipeline
     cli.py             python -m app.cli <url> — run end-to-end from the terminal
-    routes/            jobs.py, health.py, public_api.py (GET /api/{slug} + docs)
+    routes/            jobs.py (+ /jobs/{id}/events), health.py, public_api.py, gallery.py
     ingestion/         urlguard.py, robots.py, capture.py, distill.py
     llm/               budget.py, client.py (Groq → Gemini, OpenAI-compatible)
     agent/             prompts.py, parsing.py, validation.py, loop.py, service.py
     sandbox/           runner.py (parent), child.py (isolated subprocess)
   alembic/             migrations (0001 jobs+snapshots, 0002 agent tables, 0003 fabric)
-  tests/               161 tests; integration marked (sandbox escapes + Chromium)
-frontend/              Next.js 14 + Tailwind placeholder
+  tests/               175 tests; integration marked (sandbox escapes + Chromium)
+frontend/              Next.js 14 + Tailwind
+  app/                 page (landing), watch/[id] (theater), gallery, layout (OG)
+  components/          Ekg, Vitals, EventLog, ResultPanel, UrlForm, GalleryStrip
+  lib/                 api, phases (event→badge), demo (curated sites + pacing)
 deploy/                docker-compose.yml (+prod overlay), Caddyfiles
 docs/                  this file
 .github/workflows/     ruff + pytest + integration + docker build
@@ -183,5 +206,6 @@ docs/                  this file
 
 - **Phase 1 (done):** monorepo, compose stack, ingestion pipeline (robots → capture → distill → persist), job state machine, jobs API, CI.
 - **Phase 2 (done):** LLM client (Groq default / Gemini fallback, token budget, backoff), strategy selection, scraper codegen, sandboxed execution (rlimits + import guard), self-repair loop (≤4), event stream (DB + Redis pub/sub), CLI runner. Live-verified 5/5 real sites.
-- **Phase 3 (done):** `GET /api/{slug}` served from Postgres cache, per-extractor OpenAPI 3.1 + Swagger UI, scheduled stale-while-revalidate refresh with 3-strike auto-pause, versioning with supersede, abuse protection (responsible-use token, per-IP + global rate limits, LRU cap, operator denylist), deploy + backup scripts. VPS bring-up pending.
+- **Phase 3 (done):** `GET /api/{slug}` served from Postgres cache, per-extractor OpenAPI 3.1 + Swagger UI, scheduled stale-while-revalidate refresh with 3-strike auto-pause, versioning with supersede, abuse protection (responsible-use token, per-IP + global rate limits, LRU cap, operator denylist), deploy + backup scripts.
+- **Phase 4 (done):** live agent theater over SSE (full-pipeline event stream, replay + Redis follow), landing page, result screen, public gallery, demo mode, OG tags, README polish. VPS bring-up + on-device demo pending (needs the operator).
 - **Phase 4:** landing page, live agent theater (SSE), gallery, demo mode, portfolio polish.

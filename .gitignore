@@ -26,3 +26,7 @@ Thumbs.db
 # Runtime artifacts
 backups/
 *.log
+
+# Next.js generated
+next-env.d.ts
+*.tsbuildinfo
