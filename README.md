@@ -8,7 +8,17 @@ Everything runs on a single 4GB VPS. The only bill is the VPS; the LLM runs on a
 
 > Status: **Phases 1–4 complete.** Full architecture in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-<!-- Add a screen recording of the flow here (landing → live theater → result). -->
+<p align="center">
+  <img src="docs/screenshots/landing.png" alt="Lazarus landing page — paste any public URL" width="880">
+</p>
+
+### A real run, start to finish
+
+Below is an actual run against `books.toscrape.com`: the agent wakes a browser, checks robots.txt, reads the page, writes and validates an extractor, and publishes a live endpoint in ~20 seconds — every step streamed to the monitor, ending with the working API and its live JSON response.
+
+<p align="center">
+  <img src="docs/screenshots/theater.png" alt="Lazarus live agent theater: a books.toscrape.com run reaching a live API" width="880">
+</p>
 
 ## What it does, end to end
 
