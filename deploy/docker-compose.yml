@@ -44,7 +44,9 @@ services:
     volumes:
       - ../backend:/srv/backend
     ports:
-      - "8000:8000"
+      # Host port is configurable so it can dodge a conflict; the real entry is
+      # Caddy on :8080, which reaches the API over the internal network anyway.
+      - "${API_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -69,12 +71,16 @@ services:
     build:
       context: ../frontend
     command: npm run dev
+    environment:
+      # Only used if the browser hits :3000 directly; via Caddy (:8080) the API
+      # paths are same-origin and never reach Next's rewrites.
+      BACKEND_ORIGIN: http://api:8000
     volumes:
       - ../frontend:/srv/frontend
       - /srv/frontend/node_modules
       - /srv/frontend/.next
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PORT:-3000}:3000"
 
   caddy:
     image: caddy:2-alpine
@@ -83,7 +89,7 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     ports:
-      - "8080:8080"
+      - "${WEB_PORT:-8080}:8080"
     depends_on:
       - api
       - frontend
